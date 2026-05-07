@@ -1,0 +1,91 @@
+DIJITAL KUTUPHANE SISTEMI
+
+1. PROJE ANALIZI
+
+Temel islevler:
+- Kitap ekleme ve kitaplari listeleme
+- Uye ekleme ve uyeleri listeleme
+- Kitap odunc verme
+- Odunc alinan kitabi iade alma
+- Kitap durumunu takip etme: Rafta / Oduncte
+- Odunc gecmisini SQLite database icinde saklama
+
+Kullanici turleri:
+- Kutuphane gorevlisi: Kitap, uye, odunc ve iade islemlerini yapar.
+- Uye/okuyucu: Sistemde kayitli olan ve kitap odunc alabilen kisidir.
+
+Sistem senaryolari:
+- Gorevli sisteme yeni kitap ekler.
+- Gorevli sisteme yeni uye ekler.
+- Uye rafta bulunan bir kitabi odunc alir.
+- Odunc verilen kitabin durumu Oduncte olur.
+- Uye kitabi iade ettiginde kitabin durumu tekrar Rafta olur.
+- Uygulama kapatilip acildiginda veriler kutuphane.db dosyasindan geri yuklenir.
+
+2. SINIFLAR
+
+Kitap:
+- Ozellikler: kitap_id, ad, yazar, kategori, durum
+- Metodlar: kitap_durumu_degistir()
+
+Uye:
+- Ozellikler: uye_id, ad, email, odunc_kitaplar
+- Metodlar: kitap_odunc_al(), kitap_iade_et()
+
+Odunc:
+- Ozellikler: odunc_id, kitap, uye, odunc_tarihi, iade_tarihi
+- Metodlar: iade_et(), aktif_mi()
+
+KutuphaneSistemi:
+- Ozellikler: kitaplar, uyeler, oduncler, db_yolu
+- Metodlar: kitap_ekle(), uye_ekle(), kitap_odunc_ver(), kitap_iade_al(),
+  aktif_oduncler(), gecmis_oduncler(), raftaki_kitap_sayisi(),
+  oduncteki_kitap_sayisi()
+
+3. VERI YAPILARI
+
+- Dictionary: kitaplar, uyeler ve oduncler sozlukleri ID ile hizli erisim icin kullanilir.
+- List: uye.odunc_kitaplar ve odunc listeleme metodlari kullanilir.
+- SQLite database: Verilerin kalici saklanmasi icin kutuphane.db dosyasi kullanilir.
+
+4. ARAYUZ
+
+Uygulama PyQt5 ile basit grafik arayuz olarak tasarlanmistir.
+
+Ekranlar:
+- Panel
+- Kitaplar
+- Uyeler
+- Odunc/Iade
+
+5. KODLAMA
+
+Ana dosyalar:
+- kutuphane_sistemi.py: Siniflar, metodlar, database islemleri
+- kutuphane_gui.py: Grafik arayuz ve ana program akisi
+- kutuphane.db: SQLite database dosyasi
+
+6. TEST SENARYOLARI
+
+Kontrol edilen durumlar:
+- Kitap eklenebiliyor.
+- Ayni kitap ID tekrar eklenemiyor.
+- Uye eklenebiliyor.
+- Rafta olan kitap odunc verilebiliyor.
+- Oduncte olan kitap tekrar odunc verilemiyor.
+- Odunc kaydi iade edilebiliyor.
+- Iade sonrasi kitap durumu Rafta oluyor.
+- Database kapatip acma sonrasinda kayitlar korunuyor.
+- Sayi alanlarina harf girisi engelleniyor.
+- Harf alanlarina sayi girisi engelleniyor.
+
+7. KULLANIM KILAVUZU
+
+Gereken paket:
+pip install PyQt5
+
+Calistirma:
+python kutuphane_gui.py
+
+Database:
+Sistem SQLite kullanir. Veriler ayni klasordeki kutuphane.db dosyasinda saklanir.

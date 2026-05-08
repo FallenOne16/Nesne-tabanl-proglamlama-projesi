@@ -1,0 +1,419 @@
+import sqlite3
+
+# egitmen bilgilerini ram (bellek) uzerinde tasimak icin olusturulan basit veri sinifi
+class Egitmen:
+    def __init__(self, ad, uzmanlik):
+        self.ad = ad
+        self.uzmanlik = uzmanlik
+
+# ogrenci bilgilerini ram uzerinde tasimak icin veri sinifi
+class Ogrenci:
+    def __init__(self, ogrenci_id, ad, email):
+        self.ogrenci_id = ogrenci_id
+        self.ad = ad
+        self.email = email
+
+# kurs bilgilerini ve egitmen objesini bir arada tutan veri sinifi
+class Kurs:
+    def __init__(self, kurs_id, kurs_adi, egitmen, kontenjan):
+        self.kurs_id = kurs_id
+        self.kurs_adi = kurs_adi
+        self.egitmen = egitmen
+        self.kontenjan = kontenjan
+        # arayuzde doluluk oranini (ornegin 3/5) gostermek icin tuttugumuz sayac
+        self.kayitli_ogrenci_sayisi = 0
+
+
+# projenin beyni olan sinif. butun veritabani (sqlite) islenleri ve mantiksal kontroller burada yapilir.
+class KursSistemi:
+    def __init__(self):
+        # sqlite veritabanina baglanti acilir. dosya yoksa otomatik olusturulur.
+        self.baglanti = sqlite3.connect("okul_veritabani.db")
+        # veritabaninda sql komutlari (select, insert vb.) calistirmak icin imlec (cursor) olusturulur
+        self.imlec = self.baglanti.cursor()
+        
+        # sinif calistigi an tablolari kuran metot cagirilir
+        self.veritabani_kurulumu()
+        
+        # mudur paneli icin sabit kimlik bilgileri
+        self.admin_user = "Admin"
+        self.admin_pass = "1234"
+
+    def veritabani_kurulumu(self):
+        # eger daha onceden olusturulmamissa ogrenciler, kurslar ve atamalar tablolari yaratilir
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS ogrenciler (id INTEGER PRIMARY KEY, ad TEXT, email TEXT)")
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS kurslar (id INTEGER PRIMARY KEY, ad TEXT, egitmen TEXT, kontenjan INTEGER)")
+        
+        # atamalar tablosu iliskiseldir, ogrenci_id ve kurs_id'yi eslestirir (many-to-many iliskisi)
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS atamalar (ogrenci_id INTEGER, kurs_id INTEGER)")
+        self.baglanti.commit() # yapilan degisiklikleri veritabanina kaydeder
+        
+        # kurslar tablosu bos mu diye kontrol edilir
+        self.imlec.execute("SELECT COUNT(*) FROM kurslar")
+        if self.imlec.fetchone()[0] == 0:
+            # eger bos ise varsayilan kurslar ve egitmenler sisteme otomatik olarak eklenir
+            self.imlec.execute("INSERT INTO kurslar VALUES (10, 'Python İle Gui Programlama', 'Büşra Hoca', 5)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (20, 'Sql Veritabanı Yönetimi', 'Erdem Hoca', 3)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (30, 'Temel Ağ Güvenliği', 'Muharrem Hoca', 4)")
+            self.baglanti.commit()
+
+    def giris_kontrol(self, kullanici_adi, sifre):
+        # arayuzden gelen bilgilerin dogrulugunu teyit eder
+        if kullanici_adi == self.admin_user and sifre == self.admin_pass:
+            return True, "Sistem Müdürü"
+        return False, None
+
+    def ogrenci_olustur(self, ogrenci_id, ad, email):
+        # ayni id numarasiyla baska bir ogrenci var mi diye veritabanina sorulur
+        self.imlec.execute("SELECT * FROM ogrenciler WHERE id=?", (ogrenci_id,))
+        if self.imlec.fetchone():
+            return False, "Bu Id Numaralı Öğrenci Zaten Kayıtlı"
+        
+        # eger yoksa ogrenci tabloya kalici olarak eklenir
+        self.imlec.execute("INSERT INTO ogrenciler VALUES (?, ?, ?)", (ogrenci_id, ad, email))
+        self.baglanti.commit()
+        return True, "Öğrenci Sisteme Kaydedildi"
+
+    def tum_ogrencileri_getir(self):
+        # arayuzdeki listeleri doldurmak icin tum ogrencileri ceker ve nesne (object) listesi dondurur
+        self.imlec.execute("SELECT id, ad, email FROM ogrenciler")
+        return [Ogrenci(s[0], s[1], s[2]) for s in self.imlec.fetchall()]
+
+    def tum_kurslari_getir(self):
+        # tum kurslari dondurur. ayrica atamalar tablosunu sayarak o kursun kac ogrencisi oldugunu hesaplar
+        self.imlec.execute("SELECT id, ad, egitmen, kontenjan FROM kurslar")
+        liste = []
+        for s in self.imlec.fetchall():
+            kurs = Kurs(s[0], s[1], Egitmen(s[2], ""), s[3])
+            # kurs id'sine gore atamalar tablosunda kac satir oldugu sayilir (doluluk orani)
+            self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (s[0],))
+            kurs.kayitli_ogrenci_sayisi = self.imlec.fetchone()[0]
+            liste.append(kurs)
+        return liste
+
+    def ogrenci_kurslarini_getir(self, ogrenci_id):
+        # ic ice sorgu (join) kullanarak, belirli bir ogrencinin kayitli oldugu kurslarin adlarini bulur
+        sorgu = "SELECT kurslar.ad FROM atamalar JOIN kurslar ON atamalar.kurs_id = kurslar.id WHERE atamalar.ogrenci_id=?"
+        self.imlec.execute(sorgu, (ogrenci_id,))
+        return [s[0] for s in self.imlec.fetchall()]
+
+    def ogrenci_kursa_kaydet(self, ogrenci_id, kurs_id):
+        # kural 1: ogrenci bu kursa zaten onceden atanmis mi?
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_id))
+        if self.imlec.fetchone()[0] > 0:
+            return False, "Öğrenci Zaten Bu Kursa Kayıtlı"
+            
+        # kural 2: kursun kontenjani dolmus mu?
+        self.imlec.execute("SELECT kontenjan FROM kurslar WHERE id=?", (kurs_id,))
+        kontenjan = self.imlec.fetchone()[0]
+        
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (kurs_id,))
+        mevcut = self.imlec.fetchone()[0]
+        
+        if mevcut >= kontenjan:
+            return False, "Kurs Kontenjanı Dolu"
+            
+        # kurallar gecildiyse atama gerceklestirilir
+        self.imlec.execute("INSERT INTO atamalar VALUES (?, ?)", (ogrenci_id, kurs_id))
+        self.baglanti.commit()
+        return True, "Öğrenci Kursa Atandı"
+
+    def ogrenci_kurstan_cikar(self, ogrenci_id, kurs_adi):
+        # kurs adi uzerinden kursun id numarasini bulur
+        self.imlec.execute("SELECT id FROM kurslar WHERE ad=?", (kurs_adi,))
+        kurs_s = self.imlec.fetchone()
+        
+        # eger kurs bulunduysa atamalar tablosundan o ogrenci-kurs iliskisini (satirini) siler
+        if kurs_s:
+            self.imlec.execute("DELETE FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_s[0]))
+            self.baglanti.commit()
+            return True, "Öğrenci Kurs Kaydı Kaldırıldı"
+        return False, "Kurs Bulunamadı"
+
+-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+
+İKİNCİSİ
+
+import sqlite3
+
+# egitmen bilgilerini ram (bellek) uzerinde tasimak icin olusturulan basit veri sinifi
+class Egitmen:
+    def __init__(self, ad, uzmanlik):
+        self.ad = ad
+        self.uzmanlik = uzmanlik
+
+# ogrenci bilgilerini ram uzerinde tasimak icin veri sinifi
+class Ogrenci:
+    def __init__(self, ogrenci_id, ad, email):
+        self.ogrenci_id = ogrenci_id
+        self.ad = ad
+        self.email = email
+
+# kurs bilgilerini ve egitmen objesini bir arada tutan veri sinifi
+class Kurs:
+    def __init__(self, kurs_id, kurs_adi, egitmen, kontenjan):
+        self.kurs_id = kurs_id
+        self.kurs_adi = kurs_adi
+        self.egitmen = egitmen
+        self.kontenjan = kontenjan
+        # arayuzde doluluk oranini (ornegin 3/5) gostermek icin tuttugumuz sayac
+        self.kayitli_ogrenci_sayisi = 0
+
+
+# projenin beyni olan sinif. butun veritabani (sqlite) islenleri ve mantiksal kontroller burada yapilir.
+class KursSistemi:
+    def __init__(self):
+        # sqlite veritabanina baglanti acilir. dosya yoksa otomatik olusturulur.
+        self.baglanti = sqlite3.connect("okul_veritabani.db")
+        # veritabaninda sql komutlari (select, insert vb.) calistirmak icin imlec (cursor) olusturulur
+        self.imlec = self.baglanti.cursor()
+        
+        # sinif calistigi an tablolari kuran metot cagirilir
+        self.veritabani_kurulumu()
+        
+        # mudur paneli icin sabit kimlik bilgileri
+        self.admin_user = "Admin"
+        self.admin_pass = "1234"
+
+    def veritabani_kurulumu(self):
+        # eger daha onceden olusturulmamissa ogrenciler, kurslar ve atamalar tablolari yaratilir
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS ogrenciler (id INTEGER PRIMARY KEY, ad TEXT, email TEXT)")
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS kurslar (id INTEGER PRIMARY KEY, ad TEXT, egitmen TEXT, kontenjan INTEGER)")
+        
+        # atamalar tablosu iliskiseldir, ogrenci_id ve kurs_id'yi eslestirir (many-to-many iliskisi)
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS atamalar (ogrenci_id INTEGER, kurs_id INTEGER)")
+        self.baglanti.commit() # yapilan degisiklikleri veritabanina kaydeder
+        
+        # kurslar tablosu bos mu diye kontrol edilir
+        self.imlec.execute("SELECT COUNT(*) FROM kurslar")
+        if self.imlec.fetchone()[0] == 0:
+            # eger bos ise varsayilan kurslar ve egitmenler sisteme otomatik olarak eklenir
+            self.imlec.execute("INSERT INTO kurslar VALUES (10, 'Python İle Gui Programlama', 'Büşra Hoca', 5)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (20, 'Sql Veritabanı Yönetimi', 'Erdem Hoca', 3)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (30, 'Temel Ağ Güvenliği', 'Muharrem Hoca', 4)")
+            self.baglanti.commit()
+
+    def giris_kontrol(self, kullanici_adi, sifre):
+        # arayuzden gelen bilgilerin dogrulugunu teyit eder
+        if kullanici_adi == self.admin_user and sifre == self.admin_pass:
+            return True, "Sistem Müdürü"
+        return False, None
+
+    def ogrenci_olustur(self, ogrenci_id, ad, email):
+        # ayni id numarasiyla baska bir ogrenci var mi diye veritabanina sorulur
+        self.imlec.execute("SELECT * FROM ogrenciler WHERE id=?", (ogrenci_id,))
+        if self.imlec.fetchone():
+            return False, "Bu Id Numaralı Öğrenci Zaten Kayıtlı"
+        
+        # eger yoksa ogrenci tabloya kalici olarak eklenir
+        self.imlec.execute("INSERT INTO ogrenciler VALUES (?, ?, ?)", (ogrenci_id, ad, email))
+        self.baglanti.commit()
+        return True, "Öğrenci Sisteme Kaydedildi"
+
+    def ogrenci_sil(self, ogrenci_id):
+        # once atamalar tablosundan ogrencinin kayitli oldugu kurs baglantilari silinir (cop veri kalmamasi icin)
+        self.imlec.execute("DELETE FROM atamalar WHERE ogrenci_id=?", (ogrenci_id,))
+        # daha sonra ogrenci ana ogrenciler tablosundan tamamen silinir
+        self.imlec.execute("DELETE FROM ogrenciler WHERE id=?", (ogrenci_id,))
+        self.baglanti.commit()
+        return True, "Öğrenci Ve Kurs Kayıtları Sistemden Tamamen Silindi"
+
+    def tum_ogrencileri_getir(self):
+        # arayuzdeki listeleri doldurmak icin tum ogrencileri ceker ve nesne (object) listesi dondurur
+        self.imlec.execute("SELECT id, ad, email FROM ogrenciler")
+        return [Ogrenci(s[0], s[1], s[2]) for s in self.imlec.fetchall()]
+
+    def tum_kurslari_getir(self):
+        # tum kurslari dondurur. ayrica atamalar tablosunu sayarak o kursun kac ogrencisi oldugunu hesaplar
+        self.imlec.execute("SELECT id, ad, egitmen, kontenjan FROM kurslar")
+        liste = []
+        for s in self.imlec.fetchall():
+            kurs = Kurs(s[0], s[1], Egitmen(s[2], ""), s[3])
+            # kurs id'sine gore atamalar tablosunda kac satir oldugu sayilir (doluluk orani)
+            self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (s[0],))
+            kurs.kayitli_ogrenci_sayisi = self.imlec.fetchone()[0]
+            liste.append(kurs)
+        return liste
+
+    def ogrenci_kurslarini_getir(self, ogrenci_id):
+        # ic ice sorgu (join) kullanarak, belirli bir ogrencinin kayitli oldugu kurslarin adlarini bulur
+        sorgu = "SELECT kurslar.ad FROM atamalar JOIN kurslar ON atamalar.kurs_id = kurslar.id WHERE atamalar.ogrenci_id=?"
+        self.imlec.execute(sorgu, (ogrenci_id,))
+        return [s[0] for s in self.imlec.fetchall()]
+
+    def ogrenci_kursa_kaydet(self, ogrenci_id, kurs_id):
+        # kural 1: ogrenci bu kursa zaten onceden atanmis mi?
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_id))
+        if self.imlec.fetchone()[0] > 0:
+            return False, "Öğrenci Zaten Bu Kursa Kayıtlı"
+            
+        # kural 2: kursun kontenjani dolmus mu?
+        self.imlec.execute("SELECT kontenjan FROM kurslar WHERE id=?", (kurs_id,))
+        kontenjan = self.imlec.fetchone()[0]
+        
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (kurs_id,))
+        mevcut = self.imlec.fetchone()[0]
+        
+        if mevcut >= kontenjan:
+            return False, "Kurs Kontenjanı Dolu"
+            
+        # kurallar gecildiyse atama gerceklestirilir
+        self.imlec.execute("INSERT INTO atamalar VALUES (?, ?)", (ogrenci_id, kurs_id))
+        self.baglanti.commit()
+        return True, "Öğrenci Kursa Atandı"
+
+    def ogrenci_kurstan_cikar(self, ogrenci_id, kurs_adi):
+        # kurs adi uzerinden kursun id numarasini bulur
+        self.imlec.execute("SELECT id FROM kurslar WHERE ad=?", (kurs_adi,))
+        kurs_s = self.imlec.fetchone()
+        
+        # eger kurs bulunduysa atamalar tablosundan o ogrenci-kurs iliskisini (satirini) siler
+        if kurs_s:
+            self.imlec.execute("DELETE FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_s[0]))
+            self.baglanti.commit()
+            return True, "Öğrenci Kurs Kaydı Kaldırıldı"
+        return False, "Kurs Bulunamadı"
+
+
+-*-*-*-*-*-*-*-*-**-*-*--*-**-
+ÜÇÜNCÜ
+
+import sqlite3
+
+# egitmen bilgilerini ram (bellek) uzerinde tasimak icin olusturulan basit veri sinifi
+class Egitmen:
+    def __init__(self, ad, uzmanlik):
+        self.ad = ad
+        self.uzmanlik = uzmanlik
+
+# ogrenci bilgilerini ram uzerinde tasimak icin veri sinifi
+class Ogrenci:
+    def __init__(self, ogrenci_id, ad, email):
+        self.ogrenci_id = ogrenci_id
+        self.ad = ad
+        self.email = email
+
+# kurs bilgilerini ve egitmen objesini bir arada tutan veri sinifi
+class Kurs:
+    def __init__(self, kurs_id, kurs_adi, egitmen, kontenjan):
+        self.kurs_id = kurs_id
+        self.kurs_adi = kurs_adi
+        self.egitmen = egitmen
+        self.kontenjan = kontenjan
+        # arayuzde doluluk oranini (ornegin 3/5) gostermek icin tuttugumuz sayac
+        self.kayitli_ogrenci_sayisi = 0
+
+
+# projenin beyni olan sinif. butun veritabani (sqlite) islenleri ve mantiksal kontroller burada yapilir.
+class KursSistemi:
+    def __init__(self):
+        # sqlite veritabanina baglanti acilir. dosya yoksa otomatik olusturulur.
+        self.baglanti = sqlite3.connect("okul_veritabani.db")
+        # veritabaninda sql komutlari (select, insert vb.) calistirmak icin imlec (cursor) olusturulur
+        self.imlec = self.baglanti.cursor()
+        
+        # sinif calistigi an tablolari kuran metot cagirilir
+        self.veritabani_kurulumu()
+        
+        # mudur paneli icin sabit kimlik bilgileri
+        self.admin_user = "Admin"
+        self.admin_pass = "1234"
+
+    def veritabani_kurulumu(self):
+        # eger daha onceden olusturulmamissa ogrenciler, kurslar ve atamalar tablolari yaratilir
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS ogrenciler (id INTEGER PRIMARY KEY, ad TEXT, email TEXT)")
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS kurslar (id INTEGER PRIMARY KEY, ad TEXT, egitmen TEXT, kontenjan INTEGER)")
+        
+        # atamalar tablosu iliskiseldir, ogrenci_id ve kurs_id'yi eslestirir (many-to-many iliskisi)
+        self.imlec.execute("CREATE TABLE IF NOT EXISTS atamalar (ogrenci_id INTEGER, kurs_id INTEGER)")
+        self.baglanti.commit() # yapilan degisiklikleri veritabanina kaydeder
+        
+        # kurslar tablosu bos mu diye kontrol edilir
+        self.imlec.execute("SELECT COUNT(*) FROM kurslar")
+        if self.imlec.fetchone()[0] == 0:
+            # eger bos ise varsayilan kurslar ve egitmenler sisteme otomatik olarak eklenir
+            self.imlec.execute("INSERT INTO kurslar VALUES (10, 'Python İle Gui Programlama', 'Büşra Hoca', 5)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (20, 'Sql Veritabanı Yönetimi', 'Erdem Hoca', 3)")
+            self.imlec.execute("INSERT INTO kurslar VALUES (30, 'Temel Ağ Güvenliği', 'Muharrem Hoca', 4)")
+            self.baglanti.commit()
+
+    def giris_kontrol(self, kullanici_adi, sifre):
+        # arayuzden gelen bilgilerin dogrulugunu teyit eder
+        if kullanici_adi == self.admin_user and sifre == self.admin_pass:
+            return True, "Sistem Müdürü"
+        return False, None
+
+    def ogrenci_olustur(self, ogrenci_id, ad, email):
+        # ayni id numarasiyla baska bir ogrenci var mi diye veritabanina sorulur
+        self.imlec.execute("SELECT * FROM ogrenciler WHERE id=?", (ogrenci_id,))
+        if self.imlec.fetchone():
+            return False, "Bu Id Numaralı Öğrenci Zaten Kayıtlı"
+        
+        # eger yoksa ogrenci tabloya kalici olarak eklenir
+        self.imlec.execute("INSERT INTO ogrenciler VALUES (?, ?, ?)", (ogrenci_id, ad, email))
+        self.baglanti.commit()
+        return True, "Öğrenci Sisteme Kaydedildi"
+
+    def ogrenci_sil(self, ogrenci_id):
+        # once atamalar tablosundan ogrencinin kayitli oldugu kurs baglantilari silinir (cop veri kalmamasi icin)
+        self.imlec.execute("DELETE FROM atamalar WHERE ogrenci_id=?", (ogrenci_id,))
+        # daha sonra ogrenci ana ogrenciler tablosundan tamamen silinir
+        self.imlec.execute("DELETE FROM ogrenciler WHERE id=?", (ogrenci_id,))
+        self.baglanti.commit()
+        return True, "Öğrenci Ve Kurs Kayıtları Sistemden Tamamen Silindi"
+
+    def tum_ogrencileri_getir(self):
+        # arayuzdeki listeleri doldurmak icin tum ogrencileri ceker ve nesne (object) listesi dondurur
+        self.imlec.execute("SELECT id, ad, email FROM ogrenciler")
+        return [Ogrenci(s[0], s[1], s[2]) for s in self.imlec.fetchall()]
+
+    def tum_kurslari_getir(self):
+        # tum kurslari dondurur. ayrica atamalar tablosunu sayarak o kursun kac ogrencisi oldugunu hesaplar
+        self.imlec.execute("SELECT id, ad, egitmen, kontenjan FROM kurslar")
+        liste = []
+        for s in self.imlec.fetchall():
+            kurs = Kurs(s[0], s[1], Egitmen(s[2], ""), s[3])
+            # kurs id'sine gore atamalar tablosunda kac satir oldugu sayilir (doluluk orani)
+            self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (s[0],))
+            kurs.kayitli_ogrenci_sayisi = self.imlec.fetchone()[0]
+            liste.append(kurs)
+        return liste
+
+    def ogrenci_kurslarini_getir(self, ogrenci_id):
+        # ic ice sorgu (join) kullanarak, belirli bir ogrencinin kayitli oldugu kurslarin adlarini bulur
+        sorgu = "SELECT kurslar.ad FROM atamalar JOIN kurslar ON atamalar.kurs_id = kurslar.id WHERE atamalar.ogrenci_id=?"
+        self.imlec.execute(sorgu, (ogrenci_id,))
+        return [s[0] for s in self.imlec.fetchall()]
+
+    def ogrenci_kursa_kaydet(self, ogrenci_id, kurs_id):
+        # kural 1: ogrenci bu kursa zaten onceden atanmis mi?
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_id))
+        if self.imlec.fetchone()[0] > 0:
+            return False, "Öğrenci Zaten Bu Kursa Kayıtlı"
+            
+        # kural 2: kursun kontenjani dolmus mu?
+        self.imlec.execute("SELECT kontenjan FROM kurslar WHERE id=?", (kurs_id,))
+        kontenjan = self.imlec.fetchone()[0]
+        
+        self.imlec.execute("SELECT COUNT(*) FROM atamalar WHERE kurs_id=?", (kurs_id,))
+        mevcut = self.imlec.fetchone()[0]
+        
+        if mevcut >= kontenjan:
+            return False, "Kurs Kontenjanı Dolu"
+            
+        # kurallar gecildiyse atama gerceklestirilir
+        self.imlec.execute("INSERT INTO atamalar VALUES (?, ?)", (ogrenci_id, kurs_id))
+        self.baglanti.commit()
+        return True, "Öğrenci Kursa Atandı"
+
+    def ogrenci_kurstan_cikar(self, ogrenci_id, kurs_adi):
+        # kurs adi uzerinden kursun id numarasini bulur
+        self.imlec.execute("SELECT id FROM kurslar WHERE ad=?", (kurs_adi,))
+        kurs_s = self.imlec.fetchone()
+        
+        # eger kurs bulunduysa atamalar tablosundan o ogrenci-kurs iliskisini (satirini) siler
+        if kurs_s:
+            self.imlec.execute("DELETE FROM atamalar WHERE ogrenci_id=? AND kurs_id=?", (ogrenci_id, kurs_s[0]))
+            self.baglanti.commit()
+            return True, "Öğrenci Seçili Kurstan Silindi"
+        return False, "Kurs Bulunamadı"

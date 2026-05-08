@@ -1,0 +1,15 @@
+Fitness Takip Sistemi (Proje 7)
+Bu sistem, kullanıcı verilerinin zaman içindeki değişimini ve bu değişimlere neden olan aktiviteleri takip eder.
+
+Temel Sınıflar ve Görevleri
+Sporcu Sınıfı Kullanıcının fiziksel profilini tutar.
+
+Metotlar
+
+ilerleme_kaydet() Sadece kilo güncellemez, aynı zamanda eski kilo ile yeni kiloyu karşılaştırarak kullanıcıya Kilo verdiniz veya Kilo aldınız gibi bir geri bildirim (Raporlama) üretir.
+
+Antrenman Sınıfı Yapılabilecek spor türlerinin (Kardiyo, Ağırlık vb.) tanım kümesidir.
+
+Takip Sınıfı Sporcu ile Antrenman arasındaki bağı kurar. Kim, ne zaman, hangi sporu yaptı ve kaç kalori yaktı sorusunun cevabıdır.
+
+FitnessDB Sınıfı SQLite işlemlerini yürütür. Özellikle get_takipler_detayli fonksiyonu ile JOIN sorguları kullanarak 3 farklı tablodaki veriyi tek bir tabloda birleştirir.

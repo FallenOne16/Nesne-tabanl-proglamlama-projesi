@@ -1,0 +1,19 @@
+Depo ve Stok Yönetim Sistemi (Proje 8)
+Bu sistemde temel amaç, fiziksel ürünlerin dijital bir karşılığını oluşturmak ve bu ürünlerin miktar değişimlerini (stok) kontrol altında tutmaktır.
+
+Temel Sınıflar ve Görevleri:
+Urun Sınıfı: Veritabanındaki her bir satırı temsil eden "nesne" kalıbıdır.
+
+Metotlar:
+
+stok_arttir(): Mal girişi yapıldığında stoğu günceller.
+
+stok_azalt(): Satış yapıldığında stoğu düşürür, ancak önce yeterli stok olup olmadığını kontrol eder (Mantıksal Kontrol).
+
+Siparis Sınıfı: Bir satış işleminin kaydıdır.
+
+Metotlar:
+
+siparis_olustur(): En kritik metottur. Bir sipariş oluştuğunda sadece kayıt oluşturmaz, bağlı olduğu Urun nesnesinin stok_azalt metodunu tetikleyerek veritabanını günceller.
+
+DepoDB Sınıfı: SQL sorgularının (INSERT, UPDATE, DELETE, SELECT) yönetildiği merkezdir. Python nesneleri ile SQLite veritabanı arasındaki köprüdür.
